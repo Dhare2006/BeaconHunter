@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from collections import defaultdict
 import numpy as np
@@ -53,19 +53,30 @@ alerts_db = []
 
 # ============ DETECTION ENGINE ============
 
+from datetime import timezone
+
 def detect_beaconing_pattern(events: List[Dict]) -> Optional[Dict]:
     """Detect regular beaconing patterns using statistical analysis"""
     
     if len(events) < 4:
         return None
     
-    # Sort by timestamp
-    sorted_events = sorted(events, key=lambda x: x['timestamp'])
+    # Helper function to ensure all timestamps are timezone-aware
+    def ensure_timezone_aware(dt):
+        if dt.tzinfo is None:
+            # If naive, assume UTC
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    
+    # Sort by timestamp with timezone handling
+    sorted_events = sorted(events, key=lambda x: ensure_timezone_aware(x['timestamp']))
     
     # Calculate intervals
     intervals = []
     for i in range(1, len(sorted_events)):
-        interval = (sorted_events[i]['timestamp'] - sorted_events[i-1]['timestamp']).total_seconds()
+        t1 = ensure_timezone_aware(sorted_events[i-1]['timestamp'])
+        t2 = ensure_timezone_aware(sorted_events[i]['timestamp'])
+        interval = (t2 - t1).total_seconds()
         intervals.append(interval)
     
     if len(intervals) < 3:
