@@ -120,21 +120,23 @@ def check_iocs(event: Dict) -> int:
         "103.25.13.55": 20
     }
     
-    if event.get('destination_ip') in malicious_ips:
-        score += malicious_ips[event['destination_ip']]
+    # Check destination IP
+    dest_ip = event.get('destination_ip')
+    if dest_ip and dest_ip in malicious_ips:
+        score += malicious_ips[dest_ip]
     
     # Suspicious domains
-    domain = event.get('domain', '')
-    if domain:
-        domain = domain.lower()
-        if any(bad in domain for bad in ['evil', 'c2', 'malware', 'phishing']):
+    domain = event.get('domain')
+    if domain and isinstance(domain, str):
+        domain_lower = domain.lower()
+        if any(bad in domain_lower for bad in ['evil', 'c2', 'malware', 'phishing']):
             score += 25
     
-    # Suspicious user agents (FIXED: handle None values)
+    # Suspicious user agents (FIXED - handles None properly)
     ua = event.get('user_agent')
-    if ua:
-        ua = ua.lower()
-        if any(bot in ua for bot in ['curl', 'wget', 'python']):
+    if ua and isinstance(ua, str):
+        ua_lower = ua.lower()
+        if any(bot in ua_lower for bot in ['curl', 'wget', 'python']):
             score += 20
     
     return min(score, 100)
