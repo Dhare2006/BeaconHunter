@@ -33,14 +33,13 @@ class Alert(BaseModel):
 
 # ============ APP SETUP ============
 
-app = FastAPI(title="BeaconHunter", version="1.0.0")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "*",  # Allow all (temporary fix)
+        "*",  # Allow all origins temporarily
         "https://beaconhunter-dashboard.onrender.com",
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "https://beaconhunter.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
