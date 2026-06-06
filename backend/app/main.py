@@ -7,10 +7,9 @@ from collections import defaultdict
 import numpy as np
 import uuid
 
-# ============ CREATE FASTAPI APP ============
 app = FastAPI(title="BeaconHunter", version="1.0.0")
 
-# ============ CORS MIDDLEWARE ============
+# CORS - Allow all origins for live deployment
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,11 +18,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============ DATABASE (In-Memory) ============
+# Database (in-memory for Render)
 events_db = []
 alerts_db = []
 
-# ============ MODELS ============
 class NetworkEvent(BaseModel):
     source_ip: str
     destination_ip: str
@@ -34,7 +32,7 @@ class NetworkEvent(BaseModel):
     domain: Optional[str] = None
     user_agent: Optional[str] = None
 
-# ============ DETECTION ENGINE ============
+# ============ C2 BEACONING DETECTION ENGINE ============
 def detect_c2_beaconing(events):
     """Detect C2 beaconing patterns using statistical analysis"""
     
@@ -58,15 +56,14 @@ def detect_c2_beaconing(events):
     mean_interval = np.mean(intervals)
     std_interval = np.std(intervals)
     
-    # Beaconing detection logic
-    # Regular intervals with low standard deviation = C2 beaconing
+    # Beaconing detection - regular patterns = C2
     if std_interval < 5 and mean_interval >= 30:
         return {
             "alert_type": "C2 Beaconing Detected",
             "severity": "Critical",
             "score": 95,
             "confidence": "High",
-            "description": f"Regular beaconing pattern - events every {mean_interval:.0f} seconds (std: {std_interval:.1f}s)",
+            "description": f"🚨 Regular beaconing pattern detected! Events every {mean_interval:.0f} seconds (std: {std_interval:.1f}s)",
             "mitre_technique": "T1071.001"
         }
     elif std_interval < 15 and mean_interval >= 30:
@@ -75,7 +72,7 @@ def detect_c2_beaconing(events):
             "severity": "High",
             "score": 75,
             "confidence": "Medium",
-            "description": f"Potential beaconing pattern - approx every {mean_interval:.0f} seconds",
+            "description": f"⚠️ Potential beaconing pattern - approximately every {mean_interval:.0f} seconds",
             "mitre_technique": "T1071"
         }
     
@@ -87,7 +84,8 @@ def root():
     return {
         "name": "BeaconHunter",
         "status": "operational",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "message": "C2 Beaconing Detection Platform"
     }
 
 @app.get("/health")
@@ -96,17 +94,17 @@ def health():
 
 @app.post("/events/batch")
 async def ingest_batch(events: List[NetworkEvent]):
-    """Ingest multiple network events"""
+    """Ingest network events for analysis"""
     for event in events:
         events_db.append(event.dict())
     return {
-        "message": f"Ingested {len(events)} events",
+        "message": f"✅ Ingested {len(events)} events",
         "total_events": len(events_db)
     }
 
 @app.post("/detect")
 async def run_detection():
-    """Run C2 beaconing detection on all events"""
+    """Run C2 beaconing detection"""
     
     if len(events_db) < 4:
         return {
@@ -159,11 +157,11 @@ async def get_stats():
         "critical_alerts": critical,
         "high_alerts": high,
         "beaconing_detections": beaconing,
-        "unique_ips": len(set(e['destination_ip'] for e in events_db))
+        "unique_ips": len(set(e.get('destination_ip') for e in events_db))
     }
 
 @app.delete("/reset")
-async def reset_all():
+async def reset():
     """Reset all data (for testing)"""
     global events_db, alerts_db
     events_db = []
@@ -172,4 +170,4 @@ async def reset_all():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=10000)
