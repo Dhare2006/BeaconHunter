@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_URL = 'https://beaconhunter.onrender.com';
+const API_URL = 'http://localhost:8000';
 
 function App() {
   const [stats, setStats] = useState(null);
@@ -12,42 +12,45 @@ function App() {
   const [selectedSeverity, setSelectedSeverity] = useState('all');
   const [beaconingIP, setBeaconingIP] = useState('');
   const [message, setMessage] = useState('');
+const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+useEffect(() => {
+  fetchData();
+  const interval = setInterval(fetchData, 5000);
+  return () => clearInterval(interval);
+}, []);
 
-  const fetchData = async () => {
-    try {
-      const [statsRes, alertsRes, eventsRes] = await Promise.all([
-        axios.get(`${API_URL}/stats`),
-        axios.get(`${API_URL}/alerts?limit=50`),
-        axios.get(`${API_URL}/events?limit=50`)
-      ]);
-      setStats(statsRes.data);
-      setAlerts(alertsRes.data);
-      setEvents(eventsRes.data);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setMessage('⚠️ Backend not connected. Make sure server is running on port 8000');
-    }
-  };
+const fetchData = async () => {
+  try {
+    const [statsRes, alertsRes, eventsRes] = await Promise.all([
+      axios.get(`${API_URL}/stats`),
+      axios.get(`${API_URL}/alerts?limit=50`),
+      axios.get(`${API_URL}/events?limit=50`)
+    ]);
+    setStats(statsRes.data);
+    setAlerts(alertsRes.data);
+    setEvents(eventsRes.data);
+    setLoading(false);
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    setMessage('⚠️ Backend not connected');
+    setLoading(false);
+  }
+};
 
-  const handleRunDetection = async () => {
-    try {
-      setMessage('🔍 Running detection...');
-      await axios.post(`${API_URL}/detect`);
-      await fetchData();
-      setMessage('✅ Detection complete!');
-      setTimeout(() => setMessage(''), 3000);
-    } catch (error) {
-      console.error('Error running detection:', error);
-      setMessage('❌ Error running detection');
-    }
-  };
+const handleRunDetection = async () => {
+  try {
+    setMessage('🔍 Running detection...');
+    await axios.post(`${API_URL}/detect`);
+    await fetchData();
+    setMessage('✅ Detection complete!');
+    setTimeout(() => setMessage(''), 3000);
+  } catch (error) {
+    console.error('Error running detection:', error);
+    setMessage('❌ Error running detection');
+  }
+};
+
 
   const handleCreateBeaconing = async () => {
     if (!beaconingIP) {
