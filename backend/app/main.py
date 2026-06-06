@@ -7,6 +7,9 @@ from collections import defaultdict
 import numpy as np
 import uuid
 
+# ============ CREATE FASTAPI APP ============
+app = FastAPI(title="BeaconHunter", version="1.0.0")
+
 # ============ MODELS ============
 
 class NetworkEvent(BaseModel):
