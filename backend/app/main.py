@@ -289,6 +289,13 @@ async def get_stats():
         "unique_ips": len(set(e['destination_ip'] for e in events_db))
     }
 
+@app.delete("/reset")
+async def reset_all():
+    global events_db, alerts_db
+    events_db = []
+    alerts_db = []
+    return {"message": "All data cleared", "events": 0, "alerts": 0}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
