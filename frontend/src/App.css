@@ -356,3 +356,22 @@ code {
     font-size: 1.5em;
   }
 }
+/* Make MITRE ATT&CK text visible */
+.alerts-table code {
+    color: #ffa502 !important;
+    background-color: #0f132e !important;
+    padding: 4px 8px !important;
+    border-radius: 4px !important;
+    font-weight: bold !important;
+}
+
+/* Ensure all table text is visible */
+.alerts-table td {
+    color: #e0e0e0 !important;
+}
+
+/* Make severity badges visible */
+.severity-badge {
+    color: white !important;
+    font-weight: bold !important;
+}
