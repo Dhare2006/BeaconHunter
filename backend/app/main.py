@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional, Dict
-from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+from datetime import datetime
 from pydantic import BaseModel
 from collections import defaultdict
 import numpy as np
@@ -10,8 +10,20 @@ import uuid
 # ============ CREATE FASTAPI APP ============
 app = FastAPI(title="BeaconHunter", version="1.0.0")
 
-# ============ MODELS ============
+# ============ CORS MIDDLEWARE ============
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+# ============ DATABASE (In-Memory) ============
+events_db = []
+alerts_db = []
+
+# ============ MODELS ============
 class NetworkEvent(BaseModel):
     source_ip: str
     destination_ip: str
@@ -22,64 +34,21 @@ class NetworkEvent(BaseModel):
     domain: Optional[str] = None
     user_agent: Optional[str] = None
 
-class Alert(BaseModel):
-    id: str
-    timestamp: datetime
-    alert_type: str
-    severity: str
-    score: int
-    source_ip: str
-    destination_ip: str
-    description: str
-    mitre_technique: Optional[str] = None
-    confidence: str
-
-# ============ APP SETUP ============
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "*",  # Allow all origins temporarily
-        "https://beaconhunter-dashboard.onrender.com",
-        "http://localhost:5173",
-        "https://beaconhunter.onrender.com"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ============ DATABASE ============
-
-events_db = []
-alerts_db = []
-
 # ============ DETECTION ENGINE ============
-
-from datetime import timezone
-
-def detect_beaconing_pattern(events: List[Dict]) -> Optional[Dict]:
-    """Detect regular beaconing patterns using statistical analysis"""
+def detect_c2_beaconing(events):
+    """Detect C2 beaconing patterns using statistical analysis"""
     
     if len(events) < 4:
         return None
     
-    # Helper function to ensure all timestamps are timezone-aware
-    def ensure_timezone_aware(dt):
-        if dt.tzinfo is None:
-            # If naive, assume UTC
-            return dt.replace(tzinfo=timezone.utc)
-        return dt
+    # Extract and sort timestamps
+    timestamps = [e['timestamp'] for e in events]
+    timestamps.sort()
     
-    # Sort by timestamp with timezone handling
-    sorted_events = sorted(events, key=lambda x: ensure_timezone_aware(x['timestamp']))
-    
-    # Calculate intervals
+    # Calculate time intervals between events
     intervals = []
-    for i in range(1, len(sorted_events)):
-        t1 = ensure_timezone_aware(sorted_events[i-1]['timestamp'])
-        t2 = ensure_timezone_aware(sorted_events[i]['timestamp'])
-        interval = (t2 - t1).total_seconds()
+    for i in range(1, len(timestamps)):
+        interval = (timestamps[i] - timestamps[i-1]).total_seconds()
         intervals.append(interval)
     
     if len(intervals) < 3:
@@ -88,209 +57,114 @@ def detect_beaconing_pattern(events: List[Dict]) -> Optional[Dict]:
     # Statistical analysis
     mean_interval = np.mean(intervals)
     std_interval = np.std(intervals)
-    cv = std_interval / mean_interval if mean_interval > 0 else 1
     
     # Beaconing detection logic
-    if cv < 0.15:  # Very regular pattern
+    # Regular intervals with low standard deviation = C2 beaconing
+    if std_interval < 5 and mean_interval >= 30:
         return {
             "alert_type": "C2 Beaconing Detected",
             "severity": "Critical",
             "score": 95,
             "confidence": "High",
-            "description": f"Highly regular beaconing every {mean_interval:.1f} seconds (variance: {std_interval:.1f}s)",
-            "mitre_technique": "T1071.001 - Application Layer Protocol: Web Protocols",
-            "details": {
-                "mean_interval": round(mean_interval, 2),
-                "std_deviation": round(std_interval, 2),
-                "coefficient_variation": round(cv, 3),
-                "sample_size": len(intervals)
-            }
+            "description": f"Regular beaconing pattern - events every {mean_interval:.0f} seconds (std: {std_interval:.1f}s)",
+            "mitre_technique": "T1071.001"
         }
-    elif cv < 0.30:  # Somewhat regular pattern
+    elif std_interval < 15 and mean_interval >= 30:
         return {
-            "alert_type": "Potential Beaconing",
+            "alert_type": "Potential C2 Beaconing",
             "severity": "High",
             "score": 75,
             "confidence": "Medium",
-            "description": f"Regular communication pattern detected every ~{mean_interval:.1f} seconds",
-            "mitre_technique": "T1071 - Application Layer Protocol",
-            "details": {
-                "mean_interval": round(mean_interval, 2),
-                "std_deviation": round(std_interval, 2),
-                "coefficient_variation": round(cv, 3)
-            }
+            "description": f"Potential beaconing pattern - approx every {mean_interval:.0f} seconds",
+            "mitre_technique": "T1071"
         }
     
     return None
 
-def check_iocs(event: Dict) -> int:
-    """Check event against known IOCs"""
-    score = 0
-    
-    # Known malicious IPs
-    malicious_ips = {
-        "45.67.23.11": 30,
-        "185.142.53.35": 25,
-        "103.25.13.55": 20
-    }
-    
-    # Check destination IP
-    dest_ip = event.get('destination_ip')
-    if dest_ip and dest_ip in malicious_ips:
-        score += malicious_ips[dest_ip]
-    
-    # Suspicious domains
-    domain = event.get('domain')
-    if domain and isinstance(domain, str):
-        domain_lower = domain.lower()
-        if any(bad in domain_lower for bad in ['evil', 'c2', 'malware', 'phishing']):
-            score += 25
-    
-    # Suspicious user agents (FIXED - handles None properly)
-    ua = event.get('user_agent')
-    if ua and isinstance(ua, str):
-        ua_lower = ua.lower()
-        if any(bot in ua_lower for bot in ['curl', 'wget', 'python']):
-            score += 20
-    
-    return min(score, 100)
-
 # ============ API ENDPOINTS ============
-
 @app.get("/")
 def root():
     return {
         "name": "BeaconHunter",
         "status": "operational",
-        "version": "1.0.0",
-        "endpoints": [
-            "POST /events - Ingest network event",
-            "POST /events/batch - Batch ingest",
-            "GET /events - Get events",
-            "POST /detect - Run detection",
-            "GET /alerts - Get alerts",
-            "GET /stats - Get statistics"
-        ]
+        "version": "1.0.0"
     }
 
 @app.get("/health")
 def health():
     return {"status": "healthy", "timestamp": datetime.now()}
 
-@app.post("/events")
-async def ingest_event(event: NetworkEvent):
-    """Ingest a single network event"""
-    event_dict = event.dict()
-    event_dict['id'] = len(events_db)
-    event_dict['ingested_at'] = datetime.now()
-    events_db.append(event_dict)
-    
-    return {
-        "message": "Event ingested",
-        "event_id": event_dict['id'],
-        "total_events": len(events_db)
-    }
-
 @app.post("/events/batch")
 async def ingest_batch(events: List[NetworkEvent]):
-    """Ingest multiple events at once"""
+    """Ingest multiple network events"""
     for event in events:
-        event_dict = event.dict()
-        event_dict['id'] = len(events_db)
-        event_dict['ingested_at'] = datetime.now()
-        events_db.append(event_dict)
-    
+        events_db.append(event.dict())
     return {
         "message": f"Ingested {len(events)} events",
         "total_events": len(events_db)
     }
 
-@app.get("/events")
-async def get_events(limit: int = 100, dest_ip: Optional[str] = None):
-    """Get recent events"""
-    events = events_db[-limit:]
-    if dest_ip:
-        events = [e for e in events if e['destination_ip'] == dest_ip]
-    return events
-
 @app.post("/detect")
 async def run_detection():
-    """Run beaconing detection on all events"""
-    new_alerts = []
+    """Run C2 beaconing detection on all events"""
+    
+    if len(events_db) < 4:
+        return {
+            "message": "Need at least 4 events for detection",
+            "alerts_generated": 0,
+            "total_events": len(events_db)
+        }
     
     # Group events by destination IP
     grouped = defaultdict(list)
     for event in events_db:
         grouped[event['destination_ip']].append(event)
     
-    # Analyze each destination
-    for dest_ip, events in grouped.items():
-        # Check for beaconing pattern
-        beacon_alert = detect_beaconing_pattern(events)
-        if beacon_alert:
+    new_alerts = []
+    for dest_ip, evts in grouped.items():
+        alert_data = detect_c2_beaconing(evts)
+        if alert_data:
             alert = {
                 "id": str(uuid.uuid4()),
                 "timestamp": datetime.now(),
-                "source_ip": events[0]['source_ip'],
+                "source_ip": evts[0]['source_ip'],
                 "destination_ip": dest_ip,
-                **beacon_alert
+                **alert_data
             }
             alerts_db.append(alert)
             new_alerts.append(alert)
-        
-        # Check individual events for IOCs
-        for event in events:
-            ioc_score = check_iocs(event)
-            if ioc_score >= 30:
-                alert = {
-                    "id": str(uuid.uuid4()),
-                    "timestamp": datetime.now(),
-                    "alert_type": "IOC Match",
-                    "severity": "High" if ioc_score >= 70 else "Medium",
-                    "score": ioc_score,
-                    "source_ip": event['source_ip'],
-                    "destination_ip": event['destination_ip'],
-                    "description": f"IOC detected: {event.get('domain', event['destination_ip'])}",
-                    "mitre_technique": "T1595 - Active Scanning",
-                    "confidence": "High"
-                }
-                alerts_db.append(alert)
-                new_alerts.append(alert)
     
     return {
-        "message": f"Detection complete",
+        "message": "Detection complete",
         "alerts_generated": len(new_alerts),
-        "alerts": new_alerts
+        "total_events": len(events_db),
+        "total_alerts": len(alerts_db)
     }
 
 @app.get("/alerts")
-async def get_alerts(severity: Optional[str] = None, limit: int = 100):
-    """Get alerts"""
-    alerts = alerts_db[-limit:]
-    if severity:
-        alerts = [a for a in alerts if a['severity'].lower() == severity.lower()]
-    return alerts
+async def get_alerts():
+    """Get all security alerts"""
+    return alerts_db
 
 @app.get("/stats")
 async def get_stats():
     """Get dashboard statistics"""
-    severity_counts = defaultdict(int)
-    for alert in alerts_db:
-        severity_counts[alert['severity']] += 1
+    critical = sum(1 for a in alerts_db if a.get('severity') == 'Critical')
+    high = sum(1 for a in alerts_db if a.get('severity') == 'High')
+    beaconing = sum(1 for a in alerts_db if 'Beaconing' in a.get('alert_type', ''))
     
     return {
         "total_events": len(events_db),
         "total_alerts": len(alerts_db),
-        "critical_alerts": severity_counts.get("Critical", 0),
-        "high_alerts": severity_counts.get("High", 0),
-        "medium_alerts": severity_counts.get("Medium", 0),
-        "low_alerts": severity_counts.get("Low", 0),
-        "beaconing_detections": len([a for a in alerts_db if "Beaconing" in a['alert_type']]),
+        "critical_alerts": critical,
+        "high_alerts": high,
+        "beaconing_detections": beaconing,
         "unique_ips": len(set(e['destination_ip'] for e in events_db))
     }
 
 @app.delete("/reset")
 async def reset_all():
+    """Reset all data (for testing)"""
     global events_db, alerts_db
     events_db = []
     alerts_db = []
@@ -298,4 +172,4 @@ async def reset_all():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
