@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = 'https://beaconhunter.onrender.com';
 
 function App() {
   const [stats, setStats] = useState(null);
@@ -12,7 +12,7 @@ function App() {
   const [selectedSeverity, setSelectedSeverity] = useState('all');
   const [beaconingIP, setBeaconingIP] = useState('');
   const [message, setMessage] = useState('');
-const [message, setMessage] = useState('');
+
 
 useEffect(() => {
   fetchData();
